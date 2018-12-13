@@ -323,89 +323,45 @@ where
         // is the head of the list empty? If so, that's easy.
         if self.head.is_none() {
             let generation = self.generation;
-
-            let index = if let Some(index) = self.next_free {
-                match self.contents[index] {
-                    Entry::Occupied { .. } => panic!("Corrupted list"),
-                    Entry::Free { next_free } => self.next_free = next_free,
-                }
-
-                self.contents[index] = Entry::Occupied(OccupiedEntry {
-                    item,
-                    generation,
-                    next: None,
-                    prev: None,
-                });
-
-                index
-            } else {
-                let index = self.contents.len();
-
-                self.contents.push(Entry::Occupied(OccupiedEntry {
-                    item,
-                    generation,
-                    next: None,
-                    prev: None,
-                }));
-
-                index
+            let entry = OccupiedEntry {
+                item,
+                generation,
+                next: None,
+                prev: None,
             };
 
-            self.tail = Some(index);
-            self.head = Some(index);
+            let index = self.store_entry(entry);
 
-            return Index::new(index, generation);
+            self.tail = Some(index.index);
+            self.head = Some(index.index);
+
+            return index;
         }
-
-        // if it isn't empty, then we need to check the free list and put our
-        // new item in the proper place
 
         // we have a tail, so we can unwrap; we need this for appending
         let tail_index = self.tail.unwrap();
-
-        let position = if let Some(position) = self.next_free {
-            // update next_free
-            match self.contents[position] {
-                Entry::Occupied { .. } => panic!("Corrupted list"),
-                Entry::Free { next_free } => self.next_free = next_free,
-            }
-
-            self.contents[position] = Entry::Occupied(OccupiedEntry {
-                item,
-                generation: self.generation,
-                next: None,
-                prev: Some(tail_index),
-            });
-
-            position
-        } else {
-            // we don't have any, so append to the end of the list
-            let position = self.contents.len();
-
-            self.contents.push(Entry::Occupied(OccupiedEntry {
-                item,
-                generation: self.generation,
-                next: None,
-                prev: Some(tail_index),
-            }));
-
-            position
+        let entry = OccupiedEntry {
+            item,
+            generation: self.generation,
+            next: None,
+            prev: Some(tail_index),
         };
 
+        let index = self.store_entry(entry);
+
         // and then fix up the tail to refer to it
-        let new_index = Index::new(position, self.generation);
 
         // we found this index before so we know it exists
         match &mut self.contents[tail_index] {
             Entry::Free { .. } => panic!("Corrupted list"),
-            Entry::Occupied(e) => e.next = Some(new_index.index),
+            Entry::Occupied(e) => e.next = Some(index.index),
         }
 
         // update our tail to properly point at the newly inserted element
-        self.tail = Some(position);
+        self.tail = Some(index.index);
 
         // and finally, return the index associated with our new tail
-        new_index
+        index
     }
 
     /// Adds this item to the head of the list.
@@ -443,51 +399,53 @@ where
 
         // we have a head, so we can unwrap; we need this for appending
         let head_index = self.head.unwrap();
-
-        let position = if let Some(position) = self.next_free {
-            // update next_free
-            match self.contents[position] {
-                Entry::Occupied { .. } => panic!("Corrupted list"),
-                Entry::Free { next_free } => self.next_free = next_free,
-            }
-
-            self.contents[position] = Entry::Occupied(OccupiedEntry {
-                item,
-                generation: self.generation,
-                next: Some(head_index),
-                prev: None,
-            });
-
-            position
-        } else {
-            // we don't have any, so append to the end of the list
-            let position = self.contents.len();
-
-            self.contents.push(Entry::Occupied(OccupiedEntry {
-                item,
-                generation: self.generation,
-                next: Some(head_index),
-                prev: None,
-            }));
-
-            position
+        let entry = OccupiedEntry {
+            item,
+            generation: self.generation,
+            next: Some(head_index),
+            prev: None,
         };
 
-        let new_index = Index::new(position, self.generation);
+        let index = self.store_entry(entry);
 
         // and then fix up the head to refer to it
 
         // we found this index before so we know it exists
         match &mut self.contents[head_index] {
             Entry::Free { .. } => panic!("Corrupted list"),
-            Entry::Occupied(e) => e.prev = Some(new_index.index),
+            Entry::Occupied(e) => e.prev = Some(index.index),
         }
 
         // update our head to properly point at the newly inserted element
-        self.head = Some(position);
+        self.head = Some(index.index);
 
         // and finally, return the index associated with our new tail
-        new_index
+        index
+    }
+
+    /// Stores the given entry at the next available free location and returns the index
+    /// You must still update the previous/next elements, and/or the head/tail of the list,
+    /// as appropriate, after this operation has been completed.
+    fn store_entry(&mut self, entry: OccupiedEntry<T>) -> Index<T> {
+        let generation = entry.generation;
+        let index = if let Some(index) = self.next_free {
+            match self.contents[index] {
+                Entry::Occupied { .. } => panic!("Corrupted list"),
+                Entry::Free { next_free } => self.next_free = next_free,
+            }
+
+            self.contents[index] = Entry::Occupied(entry);
+
+            index
+        } else {
+            let index = self.contents.len();
+
+            self.contents.push(Entry::Occupied(entry));
+
+            index
+        };
+
+        Index::new(index, generation)
     }
 
     /// Does this list contain this element?
@@ -993,7 +951,7 @@ mod tests {
     }
 
     #[test]
-    fn insert() {
+    fn push_back() {
         let mut list = IndexList::new();
 
         list.push_back(5);
@@ -1043,7 +1001,7 @@ mod tests {
     }
 
     #[test]
-    fn insert_thrice() {
+    fn push_back_thrice() {
         let mut list = IndexList::new();
 
         list.push_back(5);
