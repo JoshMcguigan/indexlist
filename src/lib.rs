@@ -423,6 +423,42 @@ where
         index
     }
 
+    fn insert_before(&mut self, index: Index<T>, item: T) -> Option<Index<T>> {
+        let prev_index = if let Entry::Occupied(e) = self.contents.get(index.index)? {
+            if e.generation != index.generation { return None; }
+            e.prev
+        } else {
+            return None;
+        };
+
+        let entry = OccupiedEntry {
+            item,
+            generation: self.generation,
+            next: Some(index.index),
+            prev: prev_index
+        };
+        let new_item_index = self.store_entry(entry);
+
+        if let Some(prev_index) = prev_index {
+            // update next pointer in previous element
+            match &mut self.contents[prev_index] {
+                Entry::Free { .. } => panic!("Corrupted list"),
+                Entry::Occupied(e) => e.next = Some(new_item_index.index),
+            }
+        } else {
+            // there wasn't a previous element, so update the list head
+            self.head = Some(new_item_index.index);
+        }
+
+        // update prev pointer in next element
+        match &mut self.contents[index.index] {
+            Entry::Free { .. } => panic!("Corrupted list"),
+            Entry::Occupied(e) => e.prev = Some(new_item_index.index),
+        }
+
+        return Some(new_item_index);
+    }
+
     /// Stores the given entry at the next available free location and returns the index
     /// You must still update the previous/next elements, and/or the head/tail of the list,
     /// as appropriate, after this operation has been completed.
@@ -1036,6 +1072,66 @@ mod tests {
                 prev: Some(1),
                 generation: 0,
             })
+        );
+    }
+
+    #[test]
+    fn insert_before() {
+        let mut list = IndexList::new();
+
+        list.push_back(1);
+        let three_index = list.push_back(3);
+        list.insert_before(three_index, 2);
+
+        assert_eq!(
+            list.into_iter().collect::<Vec<i32>>(),
+            vec![1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn insert_before_head() {
+        let mut list = IndexList::new();
+
+        let two_index = list.push_back(2);
+        list.insert_before(two_index, 1);
+
+        assert_eq!(
+            list.into_iter().collect::<Vec<i32>>(),
+            vec![1, 2]
+        );
+    }
+
+    #[test]
+    fn insert_before_empty_index() {
+        let mut list = IndexList::new();
+
+        let two_index = list.push_back(2);
+        list.remove(two_index);
+        let one_index = list.insert_before(two_index, 1);
+
+        assert!(one_index.is_none());
+        assert_eq!(
+            list.into_iter().collect::<Vec<i32>>(),
+            vec![]
+        );
+    }
+
+    #[test]
+    fn insert_before_invalid_index() {
+        let mut list = IndexList::new();
+
+        let two_index = list.push_back(2);
+        list.remove(two_index);
+        list.push_back(5); // insert a new value, but it will be assigned a newer index
+
+        // this insert fails because two_index is invalid
+        let one_index = list.insert_before(two_index, 1);
+
+        assert!(one_index.is_none());
+        assert_eq!(
+            list.into_iter().collect::<Vec<i32>>(),
+            vec![5]
         );
     }
 
